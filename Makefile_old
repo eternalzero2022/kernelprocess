@@ -1,0 +1,47 @@
+obj-m := message_queue.o
+
+# Makefile for test programs
+CC = gcc
+CFLAGS = -Wall -Wextra
+
+all:
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
+
+test: test_simple test_normal continuous_reader continuous_writer
+
+test_simple: test_simple.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+test_normal: test_normal.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+continuous_reader: continuous_reader.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+continuous_writer: continuous_writer.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+clean:
+	rm -f test_simple test_normal continuous_reader continuous_writer
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
+
+.PHONY: all clean
+
+install:
+	sudo insmod message_queue.ko
+
+remove:
+	sudo rmmod message_queue
+
+log:
+	sudo dmesg | tail -n 10
+
+check:
+	lsmod | grep message_queue
+
+mknod:
+	sudo mknod /dev/queue c 240 0
+	sudo chmod 666 /dev/queue
+
+rmnod:
+	sudo rm /dev/queue
