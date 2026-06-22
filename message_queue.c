@@ -171,24 +171,26 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
         return 0;
     }
 
-    printk(KERN_INFO "message_queue: read requested for %zu bytes\n", count);
+    // printk(KERN_INFO "message_queue: read requested for %zu bytes\n", count);
 
     mutex_lock(&queue->lock);
     while (list_empty(&queue->msg_list))
     {
-        printk(KERN_INFO "message_queue: no messages in queue, reader is going to sleep\n");
+        // printk(KERN_INFO "message_queue: no messages in queue, reader is going to sleep\n");
         mutex_unlock(&queue->lock);
         if (filp->f_flags & O_NONBLOCK)
         {
-            printk(KERN_INFO "message_queue: non-blocking read, returning -EAGAIN\n");
+            // printk(KERN_INFO "message_queue: non-blocking read, returning -EAGAIN\n");
             return -EAGAIN; // non-blocking mode, return immediately
         }
         wait_event_interruptible(queue->not_empty, !list_empty(&queue->msg_list)); // wait until there is a message in the queue. waits only when  list_empty is true
         mutex_lock(&queue->lock);
     }
-    printk(KERN_INFO "message_queue: message available, reader is waking up\n");
+    // printk(KERN_INFO "message_queue: message available, reader is waking up\n");
 
     msg = dequeue_msg(queue); // msg is malloced in dequeue_msg, we need to free it after reading
+
+    // printk(KERN_INFO "message_queue: read message: %s\n", msg->data);
 
     wake_up_interruptible(&queue->not_full);
     mutex_unlock(&queue->lock);
@@ -203,7 +205,7 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
         count = msg->len;
     }
 
-    printk(KERN_INFO "message_queue: copying message to user space, message length: %d, bytes to copy: %zu\n", msg->len, count);
+    // printk(KERN_INFO "message_queue: copying message to user space, message length: %d, bytes to copy: %zu\n", msg->len, count);
 
     if (copy_to_user(buf, msg->data, count))
     { // number of bytes that could not be copied
@@ -211,7 +213,7 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
         return -EFAULT;
     }
 
-    printk(KERN_INFO "message_queue: message copied to user space, bytes copied: %zu\n", count);
+    // printk(KERN_INFO "message_queue: message copied to user space, bytes copied: %zu\n", count);
 
     ret = count;
     kfree(msg); // free the message after reading
@@ -236,7 +238,7 @@ static ssize_t msgqueue_write(struct file *filp, const char __user *buf, size_t 
         mutex_unlock(&queue->lock);
         if (filp->f_flags & O_NONBLOCK)
         {
-            printk(KERN_INFO "message_queue: non-blocking write, returning -EAGAIN\n");
+            // printk(KERN_INFO "message_queue: non-blocking write, returning -EAGAIN\n");
             return -EAGAIN; // non-blocking mode, return immediately
         }
         wait_event_interruptible(queue->not_full, queue->msg_count < queue->max_msg_count);
@@ -244,6 +246,8 @@ static ssize_t msgqueue_write(struct file *filp, const char __user *buf, size_t 
     }
 
     ret = enqueue_msg(queue, buf, count, priority);
+
+    // printk(KERN_INFO "message_queue: write message: %s\n", buf);
 
     if (ret > 0)
     {

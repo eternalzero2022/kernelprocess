@@ -55,7 +55,7 @@ int main(int argc, char *argv[])
         close(fd);
 
         // 随机延迟 10-50ms，让并发更真实
-        usleep((rand() % 40 + 10) * 1000);
+        // usleep((rand() % 40 + 10) * 1000);
     }
 
     printf(COLOR_YELLOW "[WRITER %d] Finished. Wrote %d messages.%s\n",

@@ -73,7 +73,7 @@ reload: remove install
 # 自动获取设备号并创建设备文件
 mknod:
 	@echo "Creating device file..."
-	@MAJOR=$$(dmesg | grep "module loaded with device major number" | tail -1 | grep -o '[0-9]\+'); \
+	@MAJOR=$$(grep message_queue /proc/devices | awk '{print $$1}'); \
 	if [ -z "$$MAJOR" ]; then \
 		echo "Error: Cannot find major number. Is module loaded?"; \
 		echo "Run 'make install' first."; \
