@@ -109,24 +109,27 @@ static int enqueue_msg(struct msgqueue *queue, const char __user *buf, size_t co
 
     queue->msg_count++;
 
+    // print the write log
+    printk(KERN_INFO "[KERNEL] ENQUEUE: priority=%d, msg='%.*s', count=%d\n",
+           priority, (int)count, msg->data, queue->msg_count);
+
     return count;
 }
 
 static struct message *dequeue_msg(struct msgqueue *queue)
 {
-    printk(KERN_INFO "message_queue: dequeue_msg called, current message count: %d\n", queue->msg_count);
     struct message *msg;
     if (list_empty(&queue->msg_list))
     {
-        printk(KERN_INFO "message_queue: dequeue_msg called but queue is empty\n");
         return NULL;
     }
 
     msg = list_first_entry(&queue->msg_list, struct message, list);
-    printk(KERN_INFO "message_queue: dequeueing message of length %d\n", msg->len);
     list_del(&msg->list);
     queue->msg_count--;
-    printk(KERN_INFO "message_queue: message dequeued, current message count: %d\n", queue->msg_count);
+    // print the read log
+    printk(KERN_INFO "[KERNEL] DEQUEUE: priority=%d, msg='%.*s', count=%d\n",
+           msg->priority, msg->len, msg->data, queue->msg_count);
 
     return msg;
 }
@@ -137,7 +140,7 @@ static int msgqueue_open(struct inode *inode, struct file *filp)
     private_data = kmalloc(sizeof(*private_data), GFP_KERNEL);
     if (!private_data)
     {
-        printk(KERN_ERR "message_queue: failed to allocate memory for private data\n");
+        printk(KERN_ERR "[KERNEL] message_queue: failed to allocate memory for private data\n");
         return -ENOMEM;
     }
     private_data->queue = global_queue;
@@ -146,7 +149,7 @@ static int msgqueue_open(struct inode *inode, struct file *filp)
     filp->private_data = private_data;
     try_module_get(THIS_MODULE); // increase the module reference count to prevent the module from being removed while it's in use
     device_open_count++;
-    printk(KERN_INFO "message_queue: device opened. current device open count: %d\n", device_open_count);
+    printk(KERN_INFO "[KERNEL] message_queue: device opened. current device open count: %d\n", device_open_count);
     return 0;
 }
 
@@ -155,7 +158,7 @@ static int msgqueue_release(struct inode *inode, struct file *filp)
     kfree(filp->private_data); // free the private data allocated in open
     module_put(THIS_MODULE);   // decrease the module reference count
     device_open_count--;
-    printk(KERN_INFO "message_queue: device closed. current device open count: %d\n", device_open_count);
+    printk(KERN_INFO "[KERNEL] message_queue: device closed. current device open count: %d\n", device_open_count);
     return 0;
 }
 
@@ -171,26 +174,24 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
         return 0;
     }
 
-    // printk(KERN_INFO "message_queue: read requested for %zu bytes\n", count);
+    printk(KERN_INFO "[KERNEL] message_queue: read requested for %zu bytes\n", count);
 
     mutex_lock(&queue->lock);
     while (list_empty(&queue->msg_list))
     {
-        // printk(KERN_INFO "message_queue: no messages in queue, reader is going to sleep\n");
+        printk(KERN_INFO "[KERNEL] message_queue: no messages in queue, reader is going to sleep\n");
         mutex_unlock(&queue->lock);
         if (filp->f_flags & O_NONBLOCK)
         {
-            // printk(KERN_INFO "message_queue: non-blocking read, returning -EAGAIN\n");
+            printk(KERN_INFO "[KERNEL] message_queue: non-blocking read, returning -EAGAIN\n");
             return -EAGAIN; // non-blocking mode, return immediately
         }
         wait_event_interruptible(queue->not_empty, !list_empty(&queue->msg_list)); // wait until there is a message in the queue. waits only when  list_empty is true
         mutex_lock(&queue->lock);
     }
-    // printk(KERN_INFO "message_queue: message available, reader is waking up\n");
+    printk(KERN_INFO "[KERNEL] message_queue: message available, reader is waking up\n");
 
     msg = dequeue_msg(queue); // msg is malloced in dequeue_msg, we need to free it after reading
-
-    // printk(KERN_INFO "message_queue: read message: %s\n", msg->data);
 
     wake_up_interruptible(&queue->not_full);
     mutex_unlock(&queue->lock);
@@ -210,10 +211,11 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
     if (copy_to_user(buf, msg->data, count))
     { // number of bytes that could not be copied
         kfree(msg);
+        printk(KERN_ERR "[KERNEL] READ: copy_to_user failed\n");
         return -EFAULT;
     }
 
-    // printk(KERN_INFO "message_queue: message copied to user space, bytes copied: %zu\n", count);
+    printk(KERN_INFO "[KERNEL] message_queue: message copied to user space, bytes copied: %zu\n", count);
 
     ret = count;
     kfree(msg); // free the message after reading
@@ -223,7 +225,7 @@ static ssize_t msgqueue_read(struct file *filp, char __user *buf, size_t count, 
 
 static ssize_t msgqueue_write(struct file *filp, const char __user *buf, size_t count, loff_t *offset)
 {
-    printk(KERN_INFO "message_queue: write requested for %zu bytes\n", count);
+    printk(KERN_INFO "[KERNEL] message_queue: write requested for %zu bytes\n", count);
     struct filp_private_data *fpd = filp->private_data;
     struct msgqueue *queue = fpd->queue; // get the message queue pointer from private_data
     ssize_t ret;
@@ -235,26 +237,30 @@ static ssize_t msgqueue_write(struct file *filp, const char __user *buf, size_t 
     // ret = enqueue_msg(queue, buf, count, priority);
     while (queue->msg_count >= queue->max_msg_count)
     {
+        printk(KERN_INFO "[KERNEL] WRITE: queue full, going to sleep\n");
         mutex_unlock(&queue->lock);
         if (filp->f_flags & O_NONBLOCK)
         {
-            // printk(KERN_INFO "message_queue: non-blocking write, returning -EAGAIN\n");
+            printk(KERN_INFO "[KERNEL] message_queue: non-blocking write, returning -EAGAIN\n");
             return -EAGAIN; // non-blocking mode, return immediately
         }
         wait_event_interruptible(queue->not_full, queue->msg_count < queue->max_msg_count);
         mutex_lock(&queue->lock);
+        printk(KERN_INFO "[KERNEL] WRITE: woken up\n");
     }
 
     ret = enqueue_msg(queue, buf, count, priority);
 
-    // printk(KERN_INFO "message_queue: write message: %s\n", buf);
+    // printk(KERN_INFO "[KERNEL] message_queue: write message: %s\n", buf);
 
     if (ret > 0)
     {
         wake_up_interruptible(&queue->not_empty); // wake up one reader waiting for a message
+        printk(KERN_INFO "[KERNEL] WRITE: wake up readers\n");
     }
 
     mutex_unlock(&queue->lock);
+    printk(KERN_INFO "[KERNEL] WRITE: returned %zd bytes\n", ret);
 
     return ret;
 }
@@ -278,7 +284,7 @@ static long msgqueue_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
             return -EINVAL; // invalid priority value
         }
         fpd->current_priority = priority; // set the current priority for messages in the queue
-        printk(KERN_INFO "message_queue: set current message priority to %d\n", fpd->current_priority);
+        printk(KERN_INFO "[KERNEL] message_queue: set current message priority to %d\n", fpd->current_priority);
         return 0;
     default:
         return -EINVAL; // invalid command
@@ -299,7 +305,7 @@ static int __init message_queue_init(void)
     global_queue = kmalloc(sizeof(*global_queue), GFP_KERNEL);
     if (!global_queue)
     {
-        printk(KERN_ERR "message_queue: failed to allocate memory for message queue\n");
+        printk(KERN_ERR "[KERNEL] message_queue: failed to allocate memory for message queue\n");
         return -ENOMEM;
     }
     init_msgqueue(global_queue);
@@ -307,13 +313,13 @@ static int __init message_queue_init(void)
     major_num = register_chrdev(0, DEVICE_NAME, &fops);
     if (major_num < 0)
     {
-        printk(KERN_ERR "message_queue: failed to register character device\n");
+        printk(KERN_ERR "[KERNEL] message_queue: failed to register character device\n");
         kfree(global_queue);
         return major_num;
     }
     device_open_count = 0;
 
-    printk(KERN_INFO "message_queue: module loaded with device major number %d\n", major_num);
+    printk(KERN_INFO "[KERNEL] message_queue: module loaded with device major number %d\n", major_num);
     return 0;
 }
 
@@ -330,7 +336,7 @@ static void __exit message_queue_exit(void)
     }
 
     kfree(global_queue);
-    printk(KERN_INFO "message_queue: module unloaded\n");
+    printk(KERN_INFO "[KERNEL] message_queue: module unloaded\n");
 }
 
 MODULE_LICENSE("GPL");
